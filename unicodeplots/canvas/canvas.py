@@ -2,6 +2,7 @@ import math
 from abc import ABC, abstractmethod
 from typing import Any, Callable, List
 
+from unicodeplots.backends.dtypes import ArrayLikeOrNumeric, Numeric
 from unicodeplots.utils import CanvasParams, ColorType
 
 
@@ -52,17 +53,21 @@ class Canvas(ABC):
     def render(self) -> str:
         """Rendering of canvas to string"""
 
-    def x_to_pixel(self, x: float) -> float:
+    def x_to_pixel(self, x: ArrayLikeOrNumeric) -> Numeric:
         """Convert logical x coordinate to pixel space"""
+        scaled_x = (x - self.origin_x) / self.width
         if self.xflip:
-            return (1 - (x - self.origin_x) / self.width) * self.pixel_width
-        return ((x - self.origin_x) / self.width) * self.pixel_width
+            return (1 - scaled_x) * self.pixel_width
+        else:
+            return scaled_x * self.pixel_width
 
-    def y_to_pixel(self, y: float) -> float:
+    def y_to_pixel(self, y: ArrayLikeOrNumeric) -> Numeric:
         """Convert logical y coordinate to pixel space"""
+        scaled_y = (y - self.origin_y) / self.height
         if self.yflip:
-            return (y - self.origin_y) / self.height * self.pixel_height
-        return (1 - (y - self.origin_y) / self.height) * self.pixel_height
+            return scaled_y * self.pixel_height
+        else:
+            return (1 - scaled_y) * self.pixel_height
 
     @property
     def params(self) -> CanvasParams:
@@ -118,11 +123,11 @@ class Canvas(ABC):
         return self._params.yflip
 
     @property
-    def xscale(self) -> Callable[[float], float]:
+    def xscale(self) -> Callable[[Numeric], Numeric]:
         """Get the x-scaling function"""
         return self._params.xscale
 
     @property
-    def yscale(self) -> Callable[[float], float]:
+    def yscale(self) -> Callable[[Numeric], Numeric]:
         """Get the y-scaling function"""
         return self._params.yscale

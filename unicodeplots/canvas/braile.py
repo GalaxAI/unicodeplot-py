@@ -1,7 +1,11 @@
 from typing import Optional
 
+from unicodeplots.backends.dtypes import ArrayLike, Numeric
 from unicodeplots.canvas.canvas import Canvas
 from unicodeplots.utils import CanvasParams, Color, ColorType
+
+SUPERSAMPLE = 8
+# NOTE: This does have impact on perf bit is meaning less currently
 
 
 class BrailleCanvas(Canvas):
@@ -56,12 +60,61 @@ class BrailleCanvas(Canvas):
         # Update color (simple overwrite)
         self.active_colors[cy][cx] = color
 
-    def line(self, x1: float, y1: float, x2: float, y2: float, color: ColorType):
+    def _draw_bresenham_segment(self, px1: int, py1: int, px2: int, py2: int, color: ColorType):
+        """Draws a single line segment using Bresenham given INTEGER pixel coordinates."""
+
+        dx = abs(px2 - px1)
+        dy = abs(py2 - py1)
+        sx = 1 if px1 < px2 else -1
+        sy = 1 if py1 < py2 else -1
+        err = dx - dy
+
+        pixels = set()
+        px_curr, py_curr = px1, py1
+
+        while True:
+            # Add the non-supersampled pixel coordinate
+            pixels.add((px_curr // SUPERSAMPLE, py_curr // SUPERSAMPLE))
+
+            if px_curr == px2 and py_curr == py2:
+                break
+
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                px_curr += sx
+            if e2 < dx:
+                err += dx
+                py_curr += sy
+
+        # Set the actual pixels on the canvas
+        for p_x, p_y in pixels:
+            self._set_pixel(p_x, p_y, color)
+
+    def vec_line(self, x1_arr: ArrayLike, y1_arr: ArrayLike, x2_arr: ArrayLike, y2_arr: ArrayLike, color: ColorType):
+        import numpy as np
+
+        num_segments = len(x1_arr)
+        px1_arr = self.x_to_pixel(x1_arr) * SUPERSAMPLE
+        py1_arr = self.y_to_pixel(y1_arr) * SUPERSAMPLE
+        px2_arr = self.x_to_pixel(x2_arr) * SUPERSAMPLE
+        py2_arr = self.y_to_pixel(y2_arr) * SUPERSAMPLE
+
+        # Vectorized rounding and conversion to integer arrays
+        px1_i_arr = np.round(px1_arr).astype(np.int_)
+        py1_i_arr = np.round(py1_arr).astype(np.int_)
+        px2_i_arr = np.round(px2_arr).astype(np.int_)
+        py2_i_arr = np.round(py2_arr).astype(np.int_)
+
+        # Loop through calculated INTEGER coordinates and draw segments
+        for i in range(num_segments):
+            self._draw_bresenham_segment(px1_i_arr[i], py1_i_arr[i], px2_i_arr[i], py2_i_arr[i], color)
+
+    def line(self, x1: Numeric, y1: Numeric, x2: Numeric, y2: Numeric, color: ColorType):
         """Draw a line between logical coordinates using supersampled Bresenham for smoother curves"""
         # Convert to high-resolution pixel coordinates (8x supersampling)
         # NOTE: If this really gives bad performance we can only do super sampling for curves or as a flag
         # Or go back to d34b commit
-        SUPERSAMPLE = 8
         px1 = self.x_to_pixel(x1) * SUPERSAMPLE
         py1 = self.y_to_pixel(y1) * SUPERSAMPLE
         px2 = self.x_to_pixel(x2) * SUPERSAMPLE
@@ -71,33 +124,25 @@ class BrailleCanvas(Canvas):
         px1, py1 = int(round(px1)), int(round(py1))
         px2, py2 = int(round(px2)), int(round(py2))
 
-        dx = abs(px2 - px1)
-        dy = abs(py2 - py1)
-        sx = 1 if px1 < px2 else -1
-        sy = 1 if py1 < py2 else -1
-        err = dx - dy
+        self._draw_bresenham_segment(px1, py1, px2, py2, color)
 
-        # Use a set to collect unique final pixels
-        pixels = set()
+    def lines(self, x_starts: ArrayLike, y_starts: ArrayLike, x_ends: ArrayLike, y_ends: ArrayLike, color: ColorType):
+        """
+        Draw multiple line segments efficiently.
 
-        while True:
-            # Convert supersampled coordinates back to normal resolution
-            pixels.add((px1 // SUPERSAMPLE, py1 // SUPERSAMPLE))
+        Accepts sequences (like lists or NumPy arrays) of coordinates.
+        """
+        num_segments = len(x_starts)
+        if not (len(y_starts) == num_segments and len(x_ends) == num_segments and len(y_ends) == num_segments):
+            raise ValueError("Input sequences for 'lines' must all have the same length")
 
-            if px1 == px2 and py1 == py2:
-                break
-
-            e2 = 2 * err
-            if e2 > -dy:
-                err -= dy
-                px1 += sx
-            if e2 < dx:
-                err += dx
-                py1 += sy
-
-        # Draw all collected pixels
-        for x, y in pixels:
-            self._set_pixel(x, y, color)
+        if hasattr(x_starts, "__array__") and hasattr(x_ends, "dtype"):
+            print("Using vec_line")
+            self.vec_line(x_starts, y_starts, x_ends, y_ends, color)
+        else:
+            # Scalar Path
+            for x1, y1, x2, y2 in zip(x_starts, y_starts, x_ends, y_ends):
+                self.line(x1, y1, x2, y2, color)
 
     def render(self) -> str:
         """Efficient rendering with pre-allocated strings"""

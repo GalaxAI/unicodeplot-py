@@ -1,5 +1,6 @@
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple, Union
 
+from unicodeplots.backends.dtypes import ArrayLike, DataOps, Numeric, dtypes
 from unicodeplots.canvas import BrailleCanvas
 from unicodeplots.components import BorderBox
 from unicodeplots.utils import Color, ColorType
@@ -54,37 +55,44 @@ class Lineplot:
         self.auto_scale = kwargs.get("auto_scale", True)
         self.plot()
 
-    def _validate_data(self, data: Iterable, name: str) -> List[Union[float, int]]:
+    def _validate_data(self, data: Iterable, name: str) -> List[Numeric]:
         """Validate that data is an iterable of numbers."""
         if not isinstance(data, Iterable) or isinstance(data, str):
             raise TypeError(f"{name} data must be an iterable (list, tuple, etc.) of numbers, got {type(data)}")
 
-        validated: List[Union[float, int]] = []
+        # Fast path for numpy arrays
+        if hasattr(data, "__array__") and hasattr(data, "dtype"):
+            return data
+
+        validated: List[Numeric] = []
+
+        # NOTE: we just not be validating the input dtype and assume user is smart.
         for value in data:
-            if not isinstance(value, (int, float)):
-                raise TypeError(f"{name} values must be numbers (int or float), got {type(value)}")
+            if not dtypes.is_numeric(value):
+                raise TypeError(f"{name} values must be numbers (int, float, or numpy numeric type), got {type(value)}")
             validated.append(value)
+
         return validated
 
     def _process_dataset(
         self,
-        x_raw: Sequence[Union[int, float]],
-        y_raw: Union[Sequence[Union[int, float]], Callable],
-        dataset_index: int = 0,  # For error messages
-    ) -> Tuple[List[Union[float, int]], List[Union[float, int]]]:
+        x_raw: Sequence[Numeric],
+        y_raw: Union[ArrayLike, Callable],
+        dataset_index: int = 0,
+    ) -> Tuple[ArrayLike, ArrayLike]:
         """Validates, potentially generates, and scales a single x, y dataset."""
 
         # 1. Validate X data
         validated_x = self._validate_data(x_raw, "X")
 
         # 2. Obtain raw Y data (either directly or by applying callable)
-        actual_y_raw: Iterable[Union[int, float]]
+        actual_y_raw: ArrayLike
         if callable(y_raw):
             try:
-                actual_y_raw = [y_raw(x) for x in validated_x]
+                actual_y_raw = DataOps.apply(y_raw, validated_x)
             except Exception as e:
                 raise ValueError(f"Error applying function to X data for dataset {dataset_index + 1}: {e}") from e
-            # Validate the results from the callable
+
             validated_y = self._validate_data(actual_y_raw, f"Y (from function, dataset {dataset_index + 1})")
         else:
             actual_y_raw = y_raw  # type: ignore # Assuming y_raw is Sequence if not callable
@@ -95,9 +103,8 @@ class Lineplot:
         if len(validated_x) != len(validated_y):
             raise ValueError(f"X and Y data length mismatch for dataset {dataset_index + 1}: {len(validated_x)} vs {len(validated_y)}")
 
-        # 4. Apply scaling
-        scaled_x = [self.canvas.xscale(x) for x in validated_x]
-        scaled_y = [self.canvas.yscale(y) for y in validated_y]
+        scaled_x = DataOps.apply(self.canvas.xscale, validated_x)
+        scaled_y = DataOps.apply(self.canvas.yscale, validated_y)
 
         return scaled_x, scaled_y
 
@@ -105,7 +112,7 @@ class Lineplot:
         """
         Parse arguments similar to matplotlib.pyplot.plot
 
-        Supported formats:
+        Supported formats:`
         - y_data only: [1, 2, 3] (x will be range(len(y)))
         - x_data, y_data: [1, 2, 3], [4, 5, 6]
         - x_data, callable: [1, 2, 3], lambda x: x**2
@@ -144,7 +151,7 @@ class Lineplot:
 
         return datasets
 
-    def _compute_data_bounds(self) -> tuple[float, float, float, float]:
+    def _compute_data_bounds(self) -> tuple[Numeric, Numeric, Numeric, Numeric]:
         """
         Compute the min/max x and y values across all datasets.
 
@@ -154,16 +161,17 @@ class Lineplot:
         if not self.datasets:
             return (0.0, 1.0, 0.0, 1.0)
 
-        # Initialize with the first point of the first dataset
-        x_values = [x for dataset in self.datasets for x in dataset[0]]
-        y_values = [y for dataset in self.datasets for y in dataset[1]]
-        if not x_values or not y_values:
-            return (0.0, 1.0, 0.0, 1.0)
+        min_x: Numeric = float("inf")
+        max_x: Numeric = float("-inf")
+        min_y: Numeric = float("inf")
+        max_y: Numeric = float("-inf")
 
-        min_x = min(x_values)
-        max_x = max(x_values)
-        min_y = min(y_values)
-        max_y = max(y_values)
+        # Initialize with the first point of the first dataset
+        for x_data, y_data in self.datasets:
+            min_x = min(min_x, DataOps.min(x_data))
+            max_x = max(max_x, DataOps.max(x_data))
+            min_y = min(min_y, DataOps.min(y_data))
+            max_y = max(max_y, DataOps.max(y_data))
 
         # Prevent division by zero if all values are the same
         if min_x == max_x:
@@ -190,7 +198,6 @@ class Lineplot:
             # Set the origin point to match the data bounds
             self.canvas.params.origin_x = self.min_x
             self.canvas.params.origin_y = self.min_y
-
             # Update width and height to match data range
             self.canvas.params.width = self.max_x - self.min_x
             self.canvas.params.height = self.max_y - self.min_y
@@ -198,17 +205,23 @@ class Lineplot:
         # add xy axis
         if self.show_axes:
             x_axis_y = max(0, self.min_y) if 0 >= self.min_y and 0 <= self.max_y else self.min_y
-            self.canvas.line(self.min_x, x_axis_y, self.max_x, x_axis_y, color="WHITE")
             y_axis_x = max(0, self.min_x) if 0 >= self.min_x and 0 <= self.max_x else self.min_x
+
+            self.canvas.line(self.min_x, x_axis_y, self.max_x, x_axis_y, color="WHITE")
             self.canvas.line(y_axis_x, self.min_y, y_axis_x, self.max_y, color="WHITE")
 
-        # Draw each dataset with its own color
         for idx, (x_data, y_data) in enumerate(self.datasets):
             color = self.colors[idx % len(self.colors)]
 
-            for i in range(1, len(x_data)):
-                # Draw the line segment - canvas will handle the scaling
-                self.canvas.line(x_data[i - 1], y_data[i - 1], x_data[i], y_data[i], color=color)
+            # Ensure there are enough points to form line segments
+            if len(x_data) > 1:
+                x_starts = x_data[:-1]
+                y_starts = y_data[:-1]
+                x_ends = x_data[1:]
+                y_ends = y_data[1:]
+
+                self.canvas.lines(x_starts, y_starts, x_ends, y_ends, color=color)
+
         return self
 
     def render(self) -> str:
