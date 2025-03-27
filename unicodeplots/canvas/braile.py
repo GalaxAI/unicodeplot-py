@@ -1,11 +1,10 @@
 from typing import Optional
 
-from unicodeplots.backends.dtypes import ArrayLike, Numeric
+from unicodeplots.backends.dtypes import ArrayLike, DataOps, Numeric
 from unicodeplots.canvas.canvas import Canvas
 from unicodeplots.utils import CanvasParams, Color, ColorType
 
-SUPERSAMPLE = 8
-# NOTE: This does have impact on perf bit is meaning less currently
+SUPERSAMPLE = 8  # Note: This helps graph look better when there is small number of data points.
 
 
 class BrailleCanvas(Canvas):
@@ -92,8 +91,6 @@ class BrailleCanvas(Canvas):
             self._set_pixel(p_x, p_y, color)
 
     def vec_line(self, x1_arr: ArrayLike, y1_arr: ArrayLike, x2_arr: ArrayLike, y2_arr: ArrayLike, color: ColorType):
-        import numpy as np
-
         num_segments = len(x1_arr)
         px1_arr = self.x_to_pixel(x1_arr) * SUPERSAMPLE
         py1_arr = self.y_to_pixel(y1_arr) * SUPERSAMPLE
@@ -101,10 +98,10 @@ class BrailleCanvas(Canvas):
         py2_arr = self.y_to_pixel(y2_arr) * SUPERSAMPLE
 
         # Vectorized rounding and conversion to integer arrays
-        px1_i_arr = np.round(px1_arr).astype(np.int_)
-        py1_i_arr = np.round(py1_arr).astype(np.int_)
-        px2_i_arr = np.round(px2_arr).astype(np.int_)
-        py2_i_arr = np.round(py2_arr).astype(np.int_)
+        px1_i_arr = DataOps.astype_int(DataOps.round(px1_arr))
+        py1_i_arr = DataOps.astype_int(DataOps.round(py1_arr))
+        px2_i_arr = DataOps.astype_int(DataOps.round(px2_arr))
+        py2_i_arr = DataOps.astype_int(DataOps.round(py2_arr))
 
         # Loop through calculated INTEGER coordinates and draw segments
         for i in range(num_segments):
@@ -130,7 +127,7 @@ class BrailleCanvas(Canvas):
         """
         Draw multiple line segments efficiently.
 
-        Accepts sequences (like lists or NumPy arrays) of coordinates.
+        Accepts sequences (like lists or arrays) of coordinates.
         """
         num_segments = len(x_starts)
         if not (len(y_starts) == num_segments and len(x_ends) == num_segments and len(y_ends) == num_segments):

@@ -60,8 +60,7 @@ class Lineplot:
         if not isinstance(data, Iterable) or isinstance(data, str):
             raise TypeError(f"{name} data must be an iterable (list, tuple, etc.) of numbers, got {type(data)}")
 
-        # Fast path for numpy arrays
-        if hasattr(data, "__array__") and hasattr(data, "dtype"):
+        if hasattr(data, "dtype"):
             return data
 
         validated: List[Numeric] = []
@@ -69,7 +68,7 @@ class Lineplot:
         # NOTE: we just not be validating the input dtype and assume user is smart.
         for value in data:
             if not dtypes.is_numeric(value):
-                raise TypeError(f"{name} values must be numbers (int, float, or numpy numeric type), got {type(value)}")
+                raise TypeError(f"{name} values must be numbers (int, float, or numeric type), got {type(value)}")
             validated.append(value)
 
         return validated

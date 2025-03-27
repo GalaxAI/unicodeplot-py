@@ -1,4 +1,3 @@
-# unicodeplots/backends/dtypes.py
 import builtins
 import collections.abc
 from dataclasses import dataclass
@@ -112,3 +111,23 @@ class DataOps:
                 raise ValueError(f"Error applying function to sequence: {e}") from e
         else:
             raise TypeError(f"Unsupported data type for DataOps.apply: {type(data)}")
+
+    @staticmethod
+    def round(data: ArrayLike) -> ArrayLike:
+        """Rounds elements of the data to the nearest integer."""
+        if NUMPY_AVAILABLE and isinstance(data, np.ndarray):
+            return np.round(data)
+        elif isinstance(data, collections.abc.Sequence) and not isinstance(data, str):
+            return [round(x) for x in data]
+        else:
+            raise TypeError(f"Unsupported data type for DataOps.round: {type(data)}")
+
+    @staticmethod
+    def astype_int(data: ArrayLike) -> ArrayLike:
+        """Converts elements of the data to integer type."""
+        if NUMPY_AVAILABLE and isinstance(data, np.ndarray):
+            return data.astype(np.int_)
+        elif isinstance(data, collections.abc.Sequence) and not isinstance(data, str):
+            return [builtins.int(x) for x in data]
+        else:
+            raise TypeError(f"Unsupported data type for DataOps.astype_int: {type(data)}")
